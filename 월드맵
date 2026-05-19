@@ -8,9 +8,9 @@ static int platform_key_down(int keycode) {
 
 #define SCR_W      80
 #define SCR_H      30
-#define PIX_W      40        // 픽셀 1칸 = 콘솔 2칸 (요구사항 1)
-#define PIX_H      28        // 마지막 2줄은 UI 전용 (요구사항 9)
-#define WORLD_W    100       // 월드 크기 (요구사항 3)
+#define PIX_W      40        // 픽셀 1칸 = 콘솔 2칸
+#define PIX_H      28        // 마지막 2줄은 UI
+#define WORLD_W    100
 #define WORLD_H    100
 
 int playerX = 50;
