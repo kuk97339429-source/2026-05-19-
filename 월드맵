@@ -1,214 +1,99 @@
-
 #include <stdio.h>
 #include <windows.h>
 
-/*
-================================================================================
- [초보자를 위한 ANSI 3비트 컬러 & 검정색의 비밀]
-================================================================================
-
- 1. ANSI 3비트(표준 8색)에 검정색이 없나요?
- -------------------------------------------------------------------------
- - 아님. 검정색은 분명히 존재함. 번호로는 **0번**임.
- - 글자색(Foreground)은 `\033[30m`, 배경색(Background)은 `\033[40m`이 검정색임.
-
- 2. 왜 검정색이 안 보일까? (또는 회색으로 보일까?)
- -------------------------------------------------------------------------
- - [배경과의 충돌]: 대부분의 터미널 기본 배경색이 이미 검정색임. 그래서 검정색 픽셀을
-   찍어도 아무것도 안 그린 것처럼 보일 수 있음.
- - [터미널 테마 문제]: 일부 현대적인 터미널(VS Code 터미널, 윈도우 터미널 등)은
-   '완전한 검정(#000000)' 대신 시력 보호를 위해 '어두운 회색'을 0번 검정으로 매핑함.
- - [해결책]: 정말 진한 검정을 원한다면 우리가 앞서 배운 **24비트 트루 컬러**
-   (`\033[48;2;0;0;0m`)를 사용하는 것이 가장 확실함.
-
- 3. 월드 좌표계와 화면 좌표계 (스크롤 시스템)
- -------------------------------------------------------------------------
- - [월드 좌표]: 게임 속 절대 위치 (예: 0 ~ 100)
- - [화면(스크린) 좌표]: 우리 눈에 보이는 터미널 창 안의 픽셀 위치
- - [스크롤 공식]: 화면 좌표 = 월드 좌표 - 카메라 위치
-   카메라가 오른쪽으로 가면 모든 물체가 왼쪽으로 밀려나는(스크롤되는) 이유임.
-
- [추가된 기능 목록]
- -------------------------------------------------------------------------
- 1. 스크린 공간: 콘솔 X 2칸 = 픽셀 1칸 (공백 2개로 정사각형 픽셀 표현)
- 2. draw_pixel()로 24비트 트루컬러 배경색 → 픽셀 스타일 정사각형
- 3. 월드 크기: 100 x 100 픽셀
- 4. 플레이어: 노란색 1픽셀, 항상 월드 위(격자 위)에 렌더링
- 5. GetAsyncKeyState + VK_UP/DOWN/LEFT/RIGHT 로 부드러운 이동
- 6. 카메라 dead zone: 화면의 1/3 ~ 2/3 범위를 벗어나면 카메라 이동
- 7. 맵 가장자리에서 카메라 clamp → 플레이어는 화면 끝까지 이동 가능
- 8. 하단 UI: 카메라 중앙 월드좌표 / 플레이어 카메라좌표 / 플레이어 월드좌표
- 9. 콘솔 80x30 고정, 마지막 2줄은 UI 전용 (픽셀 그리기 없음)
-10. 5픽셀 간격 바둑판 격자 (회색 선)
-
-================================================================================
-*/
-
-// ── 상수 정의 ─────────────────────────────────────────────────────────────────
-#define SCR_W      80        // 콘솔 가로 문자 수
-#define SCR_H      30        // 콘솔 세로 줄 수
-
-// 요구사항 1, 9:
-// 픽셀 1칸 = 콘솔 가로 2칸. 마지막 2줄은 UI 전용이므로 픽셀 영역은 28줄.
-#define PIX_W      40        // 그릴 수 있는 픽셀 가로 수 (80 / 2)
-#define PIX_H      28        // 그릴 수 있는 픽셀 세로 수 (30 - 2)
-
-// 요구사항 3: 월드 크기 100 x 100
-#define WORLD_W    100
-#define WORLD_H    100
-
-// 요구사항 6: 카메라 dead zone (픽셀 단위)
-#define DEAD_L     (PIX_W / 3)      // 가로 1/3
-#define DEAD_R     (PIX_W * 2 / 3)  // 가로 2/3
-#define DEAD_T     (PIX_H / 3)      // 세로 1/3
-#define DEAD_B     (PIX_H * 2 / 3)  // 세로 2/3
-
-// ── 전역 변수 ─────────────────────────────────────────────────────────────────
-int playerX = 50; // 플레이어 월드 X 좌표
-int playerY = 50; // 플레이어 월드 Y 좌표
-int cameraX = 0;  // 카메라 좌측 상단의 월드 X 좌표
-int cameraY = 0;  // 카메라 좌측 상단의 월드 Y 좌표
-
-// ── 함수: 콘솔 창 크기 고정 (요구사항 9) ─────────────────────────────────────
-void set_console_size() {
-    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
-    COORD bufSize = { SCR_W, SCR_H + 5 };
-    SetConsoleScreenBufferSize(hOut, bufSize);
-    SMALL_RECT winRect = { 0, 0, SCR_W - 1, SCR_H - 1 };
-    SetConsoleWindowInfo(hOut, TRUE, &winRect);
+// 키가 현재 눌려있는지 확인
+static int platform_key_down(int keycode) {
+    return (GetAsyncKeyState(keycode) & 0x8000) != 0;
 }
 
-// ── 함수: 화면 좌표계에 24비트 트루 컬러로 점 찍기 (요구사항 1, 2) ──────────
-// sx, sy: 픽셀 단위 스크린 좌표
+#define SCR_W      80
+#define SCR_H      30
+#define PIX_W      40        // 픽셀 1칸 = 콘솔 2칸 (요구사항 1)
+#define PIX_H      28        // 마지막 2줄은 UI 전용 (요구사항 9)
+#define WORLD_W    100       // 월드 크기 (요구사항 3)
+#define WORLD_H    100
+
+int playerX = 50;
+int playerY = 50;
+int cameraX = 0;
+int cameraY = 0;
+
 void draw_pixel(int sx, int sy, int r, int g, int b) {
     if (sx < 0 || sx >= PIX_W || sy < 0 || sy >= PIX_H) return;
-    // 커서 이동 후 배경색 지정 출력
     printf("\033[%d;%dH\033[48;2;%d;%d;%dm  \033[0m",
         sy + 1, (sx * 2) + 1, r, g, b);
 }
 
-// if (sx < 0 ...) 화면 밖이면 무시 (안전장치)
-// \033[%d;%dH   커서 이동 → y행 x열로
-// \033[48;2;%d;%d;%dm  배경색 RGB 설정 (24비트 트루컬러)
-// "  "          공백 2칸 출력 (= 한 픽셀)
-// \033[0m       색상 리셋
-// (sx * 2) + 1  픽셀 1칸 = 콘솔 2칸이므로 x를 2배
-
-// ── 함수: 카메라 업데이트 (요구사항 6, 7) ────────────────────────────────────
-/*
- 플레이어의 현재 스크린 픽셀 좌표 = playerX - cameraX
- 이 값이 dead zone(1/3 ~ 2/3)을 벗어나면 카메라를 이동.
- 이후 카메라를 월드 범위 안으로 clamp.
- → 가장자리에서는 카메라가 멈추므로 플레이어가 화면 끝까지 걸어갈 수 있음 (요구사항 7)
-*/
 void update_camera() {
-    int px = playerX - cameraX; // 현재 플레이어 스크린 X
-    int py = playerY - cameraY; // 현재 플레이어 스크린 Y
-
-    // 가로 dead zone 초과 시 카메라 이동
-    if (px < DEAD_L) cameraX = playerX - DEAD_L;
-    if (px > DEAD_R) cameraX = playerX - DEAD_R;
-
-    // 세로 dead zone 초과 시 카메라 이동
-    if (py < DEAD_T) cameraY = playerY - DEAD_T;
-    if (py > DEAD_B) cameraY = playerY - DEAD_B;
-
-    // 카메라 clamp: 월드 밖으로 나가지 않도록
+    int px = playerX - cameraX;
+    int py = playerY - cameraY;
+    if (px < PIX_W / 3) cameraX = playerX - PIX_W / 3;
+    if (px > PIX_W * 2 / 3) cameraX = playerX - PIX_W * 2 / 3;
+    if (py < PIX_H / 3) cameraY = playerY - PIX_H / 3;
+    if (py > PIX_H * 2 / 3) cameraY = playerY - PIX_H * 2 / 3;
     if (cameraX < 0) cameraX = 0;
     if (cameraX > WORLD_W - PIX_W) cameraX = WORLD_W - PIX_W;
     if (cameraY < 0) cameraY = 0;
     if (cameraY > WORLD_H - PIX_H) cameraY = WORLD_H - PIX_H;
 }
 
-// ── 함수: 렌더링 ──────────────────────────────────────────────────────────────
 void render() {
-    // 1. 배경: 화면 전체를 짙은 파란색으로 채움 (요구사항 9: PIX_H까지만 그림)
-    for (int y = 0; y < PIX_H; y++) {
-        for (int x = 0; x < PIX_W; x++) {
+    for (int y = 0; y < PIX_H; y++)
+        for (int x = 0; x < PIX_W; x++)
             draw_pixel(x, y, 10, 10, 40);
-        }
-    }
 
-    // 2. 바둑판 격자: 월드 5픽셀 간격으로 회색 선 (요구사항 10)
-    // 3비트 0번 검정이 불안정할 수 있으니 24비트 (70,70,70)으로 확실하게 그림
-
-    // 수직선 그리기 (5칸 간격)
     for (int wx = 0; wx < WORLD_W; wx += 5) {
-        int sx = wx - cameraX; // 월드 좌표를 화면 좌표로 변환
-        if (sx >= 0 && sx < PIX_W) {
-            for (int sy = 0; sy < PIX_H; sy++) {
+        int sx = wx - cameraX;
+        if (sx >= 0 && sx < PIX_W)
+            for (int sy = 0; sy < PIX_H; sy++)
                 draw_pixel(sx, sy, 70, 70, 70);
-            }
-        }
     }
-    // 수평선 그리기 (5칸 간격)
     for (int wy = 0; wy < WORLD_H; wy += 5) {
         int sy = wy - cameraY;
-        if (sy >= 0 && sy < PIX_H) {
-            for (int sx = 0; sx < PIX_W; sx++) {
+        if (sy >= 0 && sy < PIX_H)
+            for (int sx = 0; sx < PIX_W; sx++)
                 draw_pixel(sx, sy, 70, 70, 70);
-            }
-        }
     }
 
-    // 3. 플레이어 캐릭터: 노란색 1픽셀 (요구사항 4)
-    // 항상 격자 위에 그려야 하므로 격자 렌더링 이후에 호출
     draw_pixel(playerX - cameraX, playerY - cameraY, 255, 220, 0);
 
-    // 4. UI 출력: 마지막 2줄 (요구사항 8, 9)
-    // 카메라 중앙점의 월드 좌표
     int camCX = cameraX + PIX_W / 2;
     int camCY = cameraY + PIX_H / 2;
-    // 플레이어의 카메라(스크린 픽셀) 좌표
     int pCamX = playerX - cameraX;
     int pCamY = playerY - cameraY;
 
-    // 줄 29: 좌표 정보
     printf("\033[%d;1H\033[0m\033[K", PIX_H + 1);
     printf(" CAM(world):(%3d,%3d)  PLAYER(cam):(%3d,%3d)  PLAYER(world):(%3d,%3d)",
         camCX, camCY, pCamX, pCamY, playerX, playerY);
-
-    // 줄 30: 조작 안내
     printf("\033[%d;1H\033[K", PIX_H + 2);
-    printf(" [방향키: 이동]  [Q: 종료]");
-
+    printf(" [Arrow keys / WASD: move]  [Q: quit]");
     fflush(stdout);
 }
 
-// ── 메인 ──────────────────────────────────────────────────────────────────────
 int main() {
-    // 콘솔 크기 고정 (요구사항 9)
-    set_console_size();
 
-    // 초기 세팅: 화면 지우기, 커서 숨기기
     printf("\033[2J\033[?25l");
-
-    // 초기 카메라 위치 계산
     update_camera();
 
     while (1) {
-        // Q 종료
-        if (GetAsyncKeyState('Q') & 0x8000) break;
+        if (platform_key_down('Q')) break;
 
-        // 요구사항 5: GetAsyncKeyState + VK 파라미터로 부드러운 이동
-        // 0x8000 최상위 비트 = 현재 키가 눌려 있는 상태
-        if ((GetAsyncKeyState(VK_LEFT) & 0x8000) && playerX > 0)           playerX--;
-        if ((GetAsyncKeyState(VK_RIGHT) & 0x8000) && playerX < WORLD_W - 1) playerX++;
-        if ((GetAsyncKeyState(VK_UP) & 0x8000) && playerY > 0)           playerY--;
-        if ((GetAsyncKeyState(VK_DOWN) & 0x8000) && playerY < WORLD_H - 1) playerY++;
+        if (platform_key_down(37) && playerX > 0)           playerX--;
+        if (platform_key_down(39) && playerX < WORLD_W - 1) playerX++;
+        if (platform_key_down(38) && playerY > 0)           playerY--;
+        if (platform_key_down(40) && playerY < WORLD_H - 1) playerY++;
 
-        // 요구사항 6, 7: 카메라 dead zone 업데이트
+        if (platform_key_down('A') && playerX > 0)           playerX--;
+        if (platform_key_down('D') && playerX < WORLD_W - 1) playerX++;
+        if (platform_key_down('W') && playerY > 0)           playerY--;
+        if (platform_key_down('S') && playerY < WORLD_H - 1) playerY++;
+
         update_camera();
-
-        // 렌더링
         render();
-
-        // 프레임 딜레이 (~60fps)
         Sleep(16);
     }
 
-    // 종료 시 복구
     printf("\033[?25h\033[2J\033[1;1H");
-    printf("게임 종료.\n");
+    printf("끝났습니다.\n");
     return 0;
 }
