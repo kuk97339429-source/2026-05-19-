@@ -2,6 +2,9 @@
 #include <windows.h>
 
 // 키가 현재 눌려있는지 확인
+// 16진수 이진수로는 1000 0000 0000 0000 -> 15번 비트만 가져오기 위해 아래와 같은
+// (GetAsyncKeyState(keycode) & 0x8000) != 0; 출력
+
 static int platform_key_down(int keycode) {
     return (GetAsyncKeyState(keycode) & 0x8000) != 0;
 }
@@ -20,8 +23,7 @@ int cameraY = 0;
 
 void draw_pixel(int sx, int sy, int r, int g, int b) {
     if (sx < 0 || sx >= PIX_W || sy < 0 || sy >= PIX_H) return;
-    printf("\033[%d;%dH\033[48;2;%d;%d;%dm  \033[0m",
-        sy + 1, (sx * 2) + 1, r, g, b);
+    printf("\033[%d;%dH\033[48;2;%d;%d;%dm  \033[0m", sy + 1, (sx * 2) + 1, r, g, b);
 }
 
 void update_camera() {
